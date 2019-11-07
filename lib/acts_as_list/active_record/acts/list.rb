@@ -30,7 +30,7 @@ module ActiveRecord
 
           caller_class = self
 
-          ActiveRecord::Acts::List::PositionColumnMethodDefiner.call(caller_class, configuration[:column], configuration[:touch_on_update], )
+          ActiveRecord::Acts::List::PositionColumnMethodDefiner.call(caller_class, configuration[:column], configuration[:touch_on_update])
           ActiveRecord::Acts::List::ScopeMethodDefiner.call(caller_class, configuration[:scope])
           ActiveRecord::Acts::List::TopOfListMethodDefiner.call(caller_class, configuration[:top_of_list])
           ActiveRecord::Acts::List::AddNewAtMethodDefiner.call(caller_class, configuration[:add_new_at])
