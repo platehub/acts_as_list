@@ -44,7 +44,26 @@ module ActiveRecord::Acts::List::PositionColumnMethodDefiner #:nodoc:
 
       define_singleton_method :update_all_with_touch do |updates|
         updates += touch_record_sql if touch_on_update
+
         update_all(updates)
+      end
+
+      define_singleton_method :increment_sequentially_with_update do
+        acts_as_list_no_update do
+          pluck(primary_key).each do |id|
+            item = find_by(primary_key => id)
+            item.update(position_column => item.send(position_column) + 1)
+          end
+        end
+      end
+
+      define_singleton_method :decrement_sequentially_with_update do
+        acts_as_list_no_update do
+          pluck(primary_key).each do |id|
+            item = find_by(primary_key => id)
+            item.update(position_column => item.send(position_column) - 1)
+          end
+        end
       end
 
       private

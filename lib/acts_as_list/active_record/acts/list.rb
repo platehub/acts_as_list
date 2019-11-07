@@ -20,14 +20,17 @@ module ActiveRecord
         #   one by one to respect position column unique not null constraint.
         #   Defaults to true if position column has unique index, otherwise false.
         #   If constraint is <tt>deferrable initially deferred<tt>, overriding it with false will speed up insert_at.
+        # * +sequential_updates_with_update+ - specifies whether updating the position columns of neighboring item
+        #   should happen one by one using the ActiveRecord update method. Note: this has serious impact on the number
+        #   of queries for large lists.
         # * +touch_on_update+ - configuration to disable the update of the model timestamps when the positions are updated.
         def acts_as_list(options = {})
-          configuration = { column: "position", scope: "1 = 1", top_of_list: 1, add_new_at: :bottom, touch_on_update: true }
+          configuration = { column: "position", scope: "1 = 1", top_of_list: 1, add_new_at: :bottom, touch_on_update: true, sequential_updates_with_update: false }
           configuration.update(options) if options.is_a?(Hash)
 
           caller_class = self
 
-          ActiveRecord::Acts::List::PositionColumnMethodDefiner.call(caller_class, configuration[:column], configuration[:touch_on_update])
+          ActiveRecord::Acts::List::PositionColumnMethodDefiner.call(caller_class, configuration[:column], configuration[:touch_on_update], )
           ActiveRecord::Acts::List::ScopeMethodDefiner.call(caller_class, configuration[:scope])
           ActiveRecord::Acts::List::TopOfListMethodDefiner.call(caller_class, configuration[:top_of_list])
           ActiveRecord::Acts::List::AddNewAtMethodDefiner.call(caller_class, configuration[:add_new_at])
@@ -35,6 +38,7 @@ module ActiveRecord
           ActiveRecord::Acts::List::AuxMethodDefiner.call(caller_class)
           ActiveRecord::Acts::List::CallbackDefiner.call(caller_class, configuration[:add_new_at])
           ActiveRecord::Acts::List::SequentialUpdatesMethodDefiner.call(caller_class, configuration[:column], configuration[:sequential_updates])
+          ActiveRecord::Acts::List::SequentialUpdatesWithUpdateMethodDefiner.call(caller_class, configuration[:sequential_updates_with_update])
 
           include ActiveRecord::Acts::List::InstanceMethods
           include ActiveRecord::Acts::List::NoUpdate
@@ -360,7 +364,9 @@ module ActiveRecord
               "#{quoted_position_column_with_table_name} <= ?", new_position
             )
 
-            if sequential_updates?
+            if sequential_updates_with_update?
+              items.decrement_sequentially_with_update
+            elsif sequential_updates?
               items.reorder(acts_as_list_order_argument(:asc)).decrement_sequentially
             else
               items.decrement_all
@@ -376,7 +382,9 @@ module ActiveRecord
               "#{quoted_position_column_with_table_name} < ?", old_position
             )
 
-            if sequential_updates?
+            if sequential_updates_with_update?
+              items.increment_sequentially_with_update
+            elsif sequential_updates?
               items.reorder(acts_as_list_order_argument(:desc)).increment_sequentially
             else
               items.increment_all
