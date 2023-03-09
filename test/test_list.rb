@@ -11,7 +11,7 @@ def setup_db(position_options = {})
 
   # AR caches columns options like defaults etc. Clear them!
   ActiveRecord::Base.connection.create_table :mixins do |t|
-    t.column :pos, :integer, position_options unless position_options[:positive] && sqlite
+    t.column :pos, :integer, **position_options unless position_options[:positive] && sqlite
     t.column :active, :boolean, default: true
     t.column :parent_id, :integer
     t.column :parent_type, :string
@@ -419,6 +419,12 @@ class DefaultScopedTest < ActsAsListTestCase
     assert_equal_or_nil $default_position, new_noup.pos
   end
 
+  def test_find_or_create_doesnt_raise_deprecation_warning
+    assert_no_deprecation_warning_raised_by('ActiveRecord deprecation warning raised when using `find_or_create_by` when we didn\'t expect it') do
+      DefaultScopedMixin.find_or_create_by(pos: 5)
+    end
+  end
+
   def test_update_position
     assert_equal [1, 2, 3, 4], DefaultScopedMixin.all.map(&:id)
     DefaultScopedMixin.where(id: 2).first.set_list_position(4)
@@ -523,6 +529,12 @@ class DefaultScopedWhereTest < ActsAsListTestCase
     assert_equal_or_nil $default_position, new_noup.pos
   end
 
+  def test_find_or_create_doesnt_raise_deprecation_warning
+    assert_no_deprecation_warning_raised_by('ActiveRecord deprecation warning raised when using `find_or_create_by` when we didn\'t expect it') do
+      DefaultScopedWhereMixin.find_or_create_by(pos: 5)
+    end
+  end
+
   def test_update_position
     assert_equal [1, 2, 3, 4], DefaultScopedWhereMixin.for_active_false_tests.map(&:id)
     DefaultScopedWhereMixin.for_active_false_tests.where(id: 2).first.set_list_position(4)
@@ -592,6 +604,42 @@ class MultiDestroyTest < ActsAsListTestCase
   end
 end
 
+class MultiUpdateTest < ActsAsListTestCase
+
+  def setup
+    setup_db
+  end
+
+  def test_multiple_updates_within_transaction
+    @page = ListMixin.create! id: 100, parent_id: nil, pos: 1
+    @row = ListMixin.create! parent_id: @page.id, pos: 1
+    @column1 = ListMixin.create! parent_id: @row.id, pos: 1
+    @column2 = ListMixin.create! parent_id: @row.id, pos: 2
+    @rich_text1 = ListMixin.create! parent_id: @column1.id, pos: 1
+    @rich_text2 = ListMixin.create! parent_id: @column2.id, pos: 1
+
+    ActiveRecord::Base.transaction do
+      @rich_text1.update!(parent_id: @column2.id, pos: 1)
+
+      assert_equal [@rich_text1.id, @rich_text2.id], ListMixin.where(parent_id: @column2.id).order('pos').map(&:id)
+      assert_equal [1, 2], ListMixin.where(parent_id: @column2.id).order('pos').map(&:pos)
+
+      @column1.destroy!
+      assert_equal [@column2.id], ListMixin.where(parent_id: @row.id).order('pos').map(&:id)
+      assert_equal [1], ListMixin.where(parent_id: @row.id).order('pos').map(&:pos)
+
+      @rich_text1.update!(parent_id: @page.id, pos: 1)
+      @rich_text2.update!(parent_id: @page.id, pos: 2)
+      @row.destroy!
+      @column2.destroy!
+    end
+
+    assert_equal(1, @page.reload.pos)
+    assert_equal [@rich_text1.id, @rich_text2.id], ListMixin.where(parent_id: @page.id).order('pos').map(&:id)
+    assert_equal [1, 2], ListMixin.where(parent_id: @page.id).order('pos').map(&:pos)
+  end
+end
+
 #class TopAdditionMixin < Mixin
 
 class TopAdditionTest < ActsAsListTestCase
@@ -642,6 +690,12 @@ class MultipleListsTest < ActsAsListTestCase
     ListMixin.find(4).update :parent_id => 2, :pos => 2
     assert_equal [1, 2, 3], ListMixin.where(:parent_id => 1).order('pos').map(&:pos)
     assert_equal [1, 2, 3, 4, 5], ListMixin.where(:parent_id => 2).order('pos').map(&:pos)
+  end
+
+  def test_find_or_create_doesnt_raise_deprecation_warning
+    assert_no_deprecation_warning_raised_by('ActiveRecord deprecation warning raised when using `find_or_create_by` when we didn\'t expect it') do
+      ListMixin.where(:parent_id => 1).find_or_create_by(pos: 5)
+    end
   end
 end
 
@@ -993,6 +1047,11 @@ class SequentialUpdatesMixinNotNullUniquePositiveConstraintsTest < ActsAsListTes
 
       new.insert_at(3)
       assert_equal 3, new.pos
+    end
+
+    def test_create_at_top
+      new = SequentialUpdatesAltId.create!(pos: 1)
+      assert_equal 1, new.pos
     end
 
     def test_move_to_bottom

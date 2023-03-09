@@ -12,8 +12,8 @@ This `acts_as` extension provides the capabilities for sorting and reordering a 
 
 There are a couple of changes of behaviour from `0.8.0` onwards:
 
-- If you specify `add_new_at: :top`, new items will be added to the top of the list like always. But now, if you specify a position at insert time: `.create(position: 3)`, the position will be respected. In this example, the item will end up at position `3` and will move other items further down the list. Before `0.8.0` the position would be ignored and the item would still be added to the top of the list. [#220](https://github.com/swanandp/acts_as_list/pull/220)
-- `acts_as_list` now copes with disparate position integers (i.e. gaps between the numbers). There has been a change in behaviour for the `higher_items` method. It now returns items with the first item in the collection being the closest item to the reference item, and the last item in the collection being the furthest from the reference item (a.k.a. the first item in the list). [#223](https://github.com/swanandp/acts_as_list/pull/223)
+- If you specify `add_new_at: :top`, new items will be added to the top of the list like always. But now, if you specify a position at insert time: `.create(position: 3)`, the position will be respected. In this example, the item will end up at position `3` and will move other items further down the list. Before `0.8.0` the position would be ignored and the item would still be added to the top of the list. [#220](https://github.com/brendon/acts_as_list/pull/220)
+- `acts_as_list` now copes with disparate position integers (i.e. gaps between the numbers). There has been a change in behaviour for the `higher_items` method. It now returns items with the first item in the collection being the closest item to the reference item, and the last item in the collection being the furthest from the reference item (a.k.a. the first item in the list). [#223](https://github.com/brendon/acts_as_list/pull/223)
 
 ## Installation
 
@@ -105,6 +105,25 @@ TodoList.all.each do |todo_list|
 end
 ```
 
+When using PostgreSQL, it is also possible to leave this migration up to the database layer. Inside of the `change` block you could write:
+
+```ruby
+ execute <<~SQL.squish
+   UPDATE todo_items
+   SET position = mapping.new_position
+   FROM (
+     SELECT
+       id,
+       ROW_NUMBER() OVER (
+         PARTITION BY todo_list_id
+         ORDER BY updated_at
+       ) as new_position
+     FROM todo_items
+   ) AS mapping
+   WHERE todo_items.id = mapping.id;
+ SQL
+```
+
 ## Notes
 All `position` queries (select, update, etc.) inside gem methods are executed without the default scope (i.e. `Model.unscoped`), this will prevent nasty issues when the default scope is different from `acts_as_list` scope.
 
@@ -114,26 +133,29 @@ The `position` column is set after validations are called, so you should not put
 If you need a scope by a non-association field you should pass an array, containing field name, to a scope:
 ```ruby
 class TodoItem < ActiveRecord::Base
-  # `kind` is a plain text field (e.g. 'work', 'shopping', 'meeting'), not an association
-  acts_as_list scope: [:kind]
+  # `task_category` is a plain text field (e.g. 'work', 'shopping', 'meeting'), not an association
+  acts_as_list scope: [:task_category]
 end
 ```
 
 You can also add multiple scopes in this fashion:
 ```ruby
 class TodoItem < ActiveRecord::Base
-  acts_as_list scope: [:kind, :owner_id]
+  belongs_to :todo_list
+  acts_as_list scope: [:task_category, :todo_list_id]
 end
 ```
 
 Furthermore, you can optionally include a hash of fixed parameters that will be included in all queries:
 ```ruby
 class TodoItem < ActiveRecord::Base
-  acts_as_list scope: [:kind, :owner_id, deleted_at: nil]
+  belongs_to :todo_list
+  # or `discarded_at` if using discard
+  acts_as_list scope: [:task_category, :todo_list_id, deleted_at: nil]
 end
 ```
 
-This is useful when using this gem in conjunction with the popular [acts_as_paranoid](https://github.com/ActsAsParanoid/acts_as_paranoid) gem.
+This is useful when using this gem in conjunction with the popular [acts_as_paranoid](https://github.com/ActsAsParanoid/acts_as_paranoid) or [discard](https://github.com/jhawthorn/discard) gems.
 
 ## More Options
 - `column`
@@ -144,6 +166,8 @@ default: `1`. Use this option to define the top of the list. Use 0 to make the c
 default: `:bottom`. Use this option to specify whether objects get added to the `:top` or `:bottom` of the list. `nil` will result in new items not being added to the list on create, i.e, position will be kept nil after create.
 - `touch_on_update`
 default: `true`. Use `touch_on_update: false` if you don't want to update the timestamps of the associated records.
+- `sequential_updates`
+Specifies whether insert_at should update objects positions during shuffling one by one to respect position column unique not null constraint. Defaults to true if position column has unique index, otherwise false. If constraint is `deferrable initially deferred` (PostgreSQL), overriding it with false will speed up insert_at.
 
 ## Disabling temporarily
 
@@ -251,7 +275,7 @@ end
 ```
 
 ## Versions
-Version `0.9.0` adds `acts_as_list_no_update` (https://github.com/swanandp/acts_as_list/pull/244) and compatibility with not-null and uniqueness constraints on the database (https://github.com/swanandp/acts_as_list/pull/246). These additions shouldn't break compatibility with existing implementations.
+Version `0.9.0` adds `acts_as_list_no_update` (https://github.com/brendon/acts_as_list/pull/244) and compatibility with not-null and uniqueness constraints on the database (https://github.com/brendon/acts_as_list/pull/246). These additions shouldn't break compatibility with existing implementations.
 
 As of version `0.7.5` Rails 5 is supported.
 
@@ -261,7 +285,7 @@ All versions `0.1.5` onwards require Rails 3.0.x and higher.
 
 We often hear complaints that `position` values are repeated, incorrect etc. For example, #254. To ensure data integrity, you should rely on your database. There are two things you can do:
 
-1. Use constraints.  If you model `Item` that `belongs_to` an `Order`, and it has a `position` column, then add a unique constraint on `items` with `[:order_id, :position_id]`.  Think of it as a list invariant. What are the properties of your list that don't change no matter how many items you have in it?  One such propery is that each item has a distinct position. Another _could be_ that position is always greater than 0. It is strongly recommended that you rely on your database to enforce these invariants or constraints. Here are the docs for [PostgreSQL](https://www.postgresql.org/docs/9.5/static/ddl-constraints.html) and [MySQL](https://dev.mysql.com/doc/refman/8.0/en/alter-table.html).
+1. Use constraints.  If you model `Item` that `belongs_to` an `Order`, and it has a `position` column, then add a unique constraint on `items` with `[:order_id, :position]`.  Think of it as a list invariant. What are the properties of your list that don't change no matter how many items you have in it?  One such propery is that each item has a distinct position. Another _could be_ that position is always greater than 0. It is strongly recommended that you rely on your database to enforce these invariants or constraints. Here are the docs for [PostgreSQL](https://www.postgresql.org/docs/9.5/static/ddl-constraints.html) and [MySQL](https://dev.mysql.com/doc/refman/8.0/en/alter-table.html).
 2. Use mutexes or row level locks. At its heart the duplicate problem is that of handling concurrency. Adding a contention resolution mechanism like locks will solve it to some extent.  But it is not a solution or replacement for constraints.  Locks are also prone to deadlocks.
 
 As a library, `acts_as_list` may not always have all the context needed to apply these tools. They are much better suited at the application level.

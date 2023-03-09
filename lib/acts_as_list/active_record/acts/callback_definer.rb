@@ -11,11 +11,9 @@ module ActiveRecord::Acts::List::CallbackDefiner #:nodoc:
       before_update :check_scope, unless: :act_as_list_no_update?
       after_update :update_positions, unless: :act_as_list_no_update?
 
-      after_commit :clear_scope_changed
+      after_save :clear_scope_changed
 
-      if add_new_at.present?
-        before_create "add_to_list_#{add_new_at}".to_sym, unless: :act_as_list_no_update?
-      end
+      before_create :avoid_collision, unless: :act_as_list_no_update?
     end
   end
 end
